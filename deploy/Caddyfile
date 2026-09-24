@@ -1,0 +1,37 @@
+# TLS termination + bearer-token auth in front of tradingview-mcp.
+#
+# The MCP server has NO authentication of its own: an unauthenticated POST to
+# /mcp opens a session and gives the caller all 37 tools. It must never be
+# exposed directly. This file is the only thing standing between the public
+# internet and your server, so the default here is deny.
+#
+# {$DOMAIN} and {$MCP_TOKEN} are substituted from the environment when the
+# Caddyfile is parsed. Both are required; see .env.example.
+
+{$DOMAIN} {
+	# Automatic HTTPS via Let's Encrypt. Requires {$DOMAIN}'s A record to point
+	# at this box and ports 80 + 443 to be reachable.
+
+	@authorized header Authorization "Bearer {$MCP_TOKEN}"
+
+	handle @authorized {
+		reverse_proxy mcp:8000 {
+			# streamable-http keeps a long-lived SSE stream open. Without this,
+			# Caddy buffers the response and the client hangs waiting for events
+			# that never arrive.
+			flush_interval -1
+		}
+	}
+
+	# Anything without a valid token. No hint about why.
+	handle {
+		respond "Unauthorized" 401
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

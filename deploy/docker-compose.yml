@@ -1,0 +1,58 @@
+# Production deployment: tradingview-mcp behind Caddy (TLS + bearer auth).
+#
+#   cp .env.example .env && edit it
+#   docker compose up -d
+#   ./smoke-test.sh
+#
+# The mcp service deliberately publishes NO host ports. It is reachable only
+# from Caddy over the internal network. Do not add a ports: block to it.
+
+services:
+  mcp:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: tradingview-mcp:local
+    restart: unless-stopped
+    command: ["streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+    expose:
+      - "8000"
+    networks:
+      - internal
+    # The upstream data sources rate-limit by IP. These caps keep a burst of
+    # tool calls from tripping them; raise only if you see queuing.
+    environment:
+      - TV_TA_MAX_CONCURRENCY=${TV_TA_MAX_CONCURRENCY:-4}
+      - TV_TA_MIN_SPACING=${TV_TA_MIN_SPACING:-0.8}
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - mcp
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?DOMAIN is required - see .env.example}
+      - MCP_TOKEN=${MCP_TOKEN:?MCP_TOKEN is required - see .env.example}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
